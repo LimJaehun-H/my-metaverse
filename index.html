@@ -9,42 +9,38 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        #map { height: 100vh; width: 100vw; z-index: 1; background-color: #f1f5f9; cursor: crosshair; }
-        .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); }
         
+        /* 지도 스타일 강제 적용 */
+        #map { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            z-index: 0; 
+            background-color: #e5e7eb; /* 지도 로딩 전 회색 배경 */
+        }
+        
+        .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); }
         .avatar-marker { display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .avatar-img { width: 44px; height: 44px; border-radius: 16px; border: 3px solid white; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 22px; transition: transform 0.2s; }
         .avatar-label { background: rgba(15, 23, 42, 0.8); color: white; padding: 3px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; margin-top: 6px; white-space: nowrap; }
         .status-tag { position: absolute; top: -12px; right: -12px; font-size: 14px; background: white; border-radius: 10px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        
         .ui-overlay { z-index: 1000; position: absolute; }
         .results-scroll::-webkit-scrollbar { width: 4px; }
         .results-scroll::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-        
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
         .animate-float { animation: float 3s ease-in-out infinite; }
         #chatPanel { transition: transform 0.3s ease; }
         .chat-hidden { transform: translateX(-110%); }
-
-        /* 로딩 스크린 스타일 */
-        #loadingScreen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f8fafc; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.5s; }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <!-- 로딩 스크린 (흰색 화면 방지용) -->
-    <div id="loadingScreen">
-        <div class="loader mb-4"></div>
-        <h2 class="text-xl font-bold text-slate-700">메타버스 접속 중...</h2>
-        <p class="text-sm text-slate-400 mt-2">잠시만 기다려주세요</p>
-    </div>
-
     <div id="map"></div>
 
-    <!-- 버전 확인 및 상태 배지 -->
-    <div class="ui-overlay top-2 left-2 z-[2000] pointer-events-none flex flex-col gap-1">
-        <span class="bg-blue-600/80 text-white text-[10px] px-2 py-1 rounded-full font-mono shadow-md">ver. 2.1 (Recovery)</span>
+    <!-- 버전 확인용 배지 -->
+    <div class="ui-overlay top-2 left-2 z-[2000] pointer-events-none">
+        <span class="bg-blue-600/90 text-white text-[10px] px-2 py-1 rounded-full font-mono shadow-md">ver. 3.0 (Map Fix)</span>
     </div>
 
     <!-- 상단 UI -->
@@ -76,7 +72,7 @@
                         <option value="sleep">😴 취침 중</option>
                     </select>
                 </div>
-                <div id="playerCount" class="text-xs font-black text-slate-500 px-4">Loading...</div>
+                <div id="playerCount" class="text-xs font-black text-slate-500 px-4">Connecting...</div>
             </div>
         </div>
     </div>
@@ -122,28 +118,14 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, serverTimestamp, addDoc, query } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-        // 전역 에러 핸들러 (흰색 화면 방지)
-        window.onerror = function(msg, url, line) {
-            document.getElementById('loadingScreen').innerHTML = `
-                <div class="text-center p-6 bg-white rounded-xl shadow-2xl max-w-sm">
-                    <h2 class="text-red-500 font-bold mb-2">⚠️ 오류 발생</h2>
-                    <p class="text-xs text-gray-600 mb-4">${msg}</p>
-                    <button onclick="location.reload()" class="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm">새로고침</button>
-                </div>
-            `;
-            return false;
-        };
-
-        // 1. Firebase 설정 (하이브리드 모드)
+        // 1. Firebase 설정
         let firebaseConfig;
         let appId;
 
         if (typeof __firebase_config !== 'undefined') {
-            // [Preview 환경]
             firebaseConfig = JSON.parse(__firebase_config);
             appId = typeof __app_id !== 'undefined' ? __app_id : 'korea-metaverse-preview';
         } else {
-            // [배포 환경]
             firebaseConfig = {
                 apiKey: "AIzaSyD_7J5EpBLxErjgjYRBvEGRgJJfStbx58g", 
                 authDomain: "korea-metaverse.firebaseapp.com",
@@ -160,20 +142,21 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // 지도 설정
+        // [중요] 지도 타일 교체 (OSM Standard) & 높이/너비 강제
         const koreaBounds = L.latLngBounds([32.5, 123.5], [38.8, 131.0]);
         const map = L.map('map', { zoomControl: false, attributionControl: false, minZoom: 7, maxBounds: koreaBounds, maxBoundsViscosity: 1.0 }).setView([36.764, 127.281], 15);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd' }).addTo(map);
+        
+        // 표준 OSM 타일 사용 (호환성 최고)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+            maxZoom: 19, 
+            attribution: '© OpenStreetMap' 
+        }).addTo(map);
+        
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // 로딩 화면 제거 (지도 로드 직후)
-        setTimeout(() => {
-            const loader = document.getElementById('loadingScreen');
-            if(loader) {
-                loader.style.opacity = '0';
-                setTimeout(() => loader.remove(), 500);
-            }
-        }, 1000);
+        // 지도 렌더링 강제 갱신 (화면 깨짐 방지)
+        setTimeout(() => { map.invalidateSize(); }, 500);
+        setTimeout(() => { map.invalidateSize(); }, 2000);
 
         let localUser = { id: null, lat: 36.764, lng: 127.281, status: 'studying', emoji: '📖', isShared: false };
         const remoteMarkers = {};
@@ -201,12 +184,12 @@
                     if (user) { 
                         localUser.id = user.uid;
                         document.getElementById('statusIndicator').className = "w-2 h-2 rounded-full bg-green-500 animate-pulse";
+                        document.querySelector('.ui-overlay.top-2.left-2 span').textContent = "Status: Connected";
                         startListening(); 
                     }
                 });
             } catch(e) { 
                 console.error("Login Error:", e);
-                // 에러 발생해도 지도는 작동하도록 유지
                 document.getElementById('statusIndicator').className = "w-2 h-2 rounded-full bg-red-500";
             }
         }
@@ -237,7 +220,7 @@
                     }
                 });
                 document.getElementById('playerCount').textContent = `${Object.keys(remoteMarkers).length + 1} ONLINE`;
-            }, (error) => console.log("Offline Mode")); // 에러 무시 (오프라인 모드)
+            }, (error) => console.log("Offline Mode"));
 
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (snapshot) => {
                 const messages = [];
