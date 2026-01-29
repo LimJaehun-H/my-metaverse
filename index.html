@@ -12,6 +12,7 @@
         
         #map { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; background-color: #e5e7eb; }
         
+        /* UI 패널 스타일 */
         .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15); }
         
         /* 아바타 스타일 */
@@ -33,6 +34,9 @@
         
         #chatPanel { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .chat-hidden { transform: translateX(-120%); }
+
+        /* 모바일 터치 최적화 */
+        input, select, button { touch-action: manipulation; }
     </style>
 </head>
 <body>
@@ -48,7 +52,7 @@
 
     <!-- 검색창 & 컨트롤 -->
     <div class="ui-overlay top-4 left-0 right-0 flex justify-center pointer-events-none px-4">
-        <!-- 🔥 [수정] id="topUiContainer" 추가하여 터치 이벤트 제어 -->
+        <!-- 🔥 [수정] id="topUiContainer" 추가 -->
         <div id="topUiContainer" class="flex flex-col w-full max-w-md gap-2 pointer-events-auto">
             <!-- 검색바 -->
             <div class="glass-panel p-2 rounded-2xl flex items-center gap-2 shadow-xl">
@@ -133,7 +137,7 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, serverTimestamp, addDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-        // 1. Firebase 설정 (완벽 수정됨)
+        // 1. Firebase 설정
         const firebaseConfig = {
             apiKey: "AIzaSyD_7J5EpBLxErjGjYRBvEGRgJJfStbx58g", 
             authDomain: "korea-metaverse.firebaseapp.com",
@@ -152,28 +156,39 @@
         const map = L.map('map', { zoomControl: false }).setView([37.5665, 126.9780], 13);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
 
-        // 🔥 [모바일 패치] UI 요소가 지도의 터치를 방해하지 않도록 설정
-        // 이 코드가 없으면 모바일에서 검색창 클릭 시 지도가 같이 눌려서 입력이 풀립니다.
-        const disableMapInteraction = (id) => {
+        // 🔥 [모바일 패치] UI 요소와 지도 간의 이벤트 간섭을 완벽하게 차단
+        // Leaflet.DomEvent.disableClickPropagation만으로는 부족한 경우가 있어, 직접 이벤트 전파를 막습니다.
+        function preventMapInterference(id) {
             const el = document.getElementById(id);
-            if (el) {
-                L.DomEvent.disableClickPropagation(el);
-                L.DomEvent.disableScrollPropagation(el);
-            }
-        };
+            if (!el) return;
 
-        // UI 요소들에 적용
-        ['topUiContainer', 'chatPanel', 'openChatBtn', 'fitBoundsBtn', 'confirmPanel'].forEach(id => {
-            disableMapInteraction(id);
-        });
-        
-        // 검색창과 채팅창은 터치 이벤트도 확실하게 막기
-        const stopTouch = (e) => e.stopPropagation();
-        ['searchInput', 'chatInput', 'searchBtn', 'sendChatBtn', 'statusSelect'].forEach(id => {
+            // 1. Leaflet 내장 함수: 클릭, 더블클릭, 스크롤 휠 전파 차단
+            L.DomEvent.disableClickPropagation(el);
+            L.DomEvent.disableScrollPropagation(el);
+
+            // 2. 모바일 터치 이벤트 강력 차단 (지도 드래그/줌 방지)
+            const stop = (e) => { e.stopPropagation(); };
+
+            // 입력창과 버튼에 대해 터치 이벤트가 지도로 새나가지 않게 함
+            el.addEventListener('touchstart', stop, { passive: false });
+            el.addEventListener('touchmove', stop, { passive: false });
+            el.addEventListener('touchend', stop, { passive: false });
+            el.addEventListener('mousedown', stop); // PC 마우스 클릭도 보호
+            el.addEventListener('click', stop);
+        }
+
+        // 전체 컨테이너와 버튼들에 적용
+        ['topUiContainer', 'chatPanel', 'openChatBtn', 'fitBoundsBtn', 'confirmPanel', 'searchResults'].forEach(preventMapInterference);
+
+        // 입력창에는 포커스가 유지되도록 추가 조치 (특히 아이패드/모바일용)
+        ['searchInput', 'chatInput'].forEach(id => {
             const el = document.getElementById(id);
             if(el) {
-                el.addEventListener('touchstart', stopTouch);
-                el.addEventListener('touchmove', stopTouch);
+                // 입력창 터치 시 바로 포커스 (지도가 포커스를 뺏지 못하게 함)
+                el.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    el.focus(); 
+                }, { passive: false });
             }
         });
 
@@ -252,7 +267,6 @@
             const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
             onSnapshot(usersRef, (snapshot) => {
                 const bounds = L.latLngBounds();
-                let count = 0;
 
                 snapshot.docChanges().forEach((change) => {
                     const data = change.doc.data();
@@ -275,11 +289,11 @@
                             markers[uid].setIcon(createIcon(data.emoji, false, false));
                         }
                         bounds.extend([data.lat, data.lng]);
-                        count++;
                     }
                 });
                 
-                document.getElementById('playerCount').innerText = count + 1;
+                const onlineCount = Object.keys(markers).length + 1;
+                document.getElementById('playerCount').innerText = onlineCount;
                 
                 window.allUsersBounds = bounds;
                 if (localUser.id && markers['me']) window.allUsersBounds.extend(markers['me'].getLatLng());
@@ -299,6 +313,9 @@
         async function searchPlace() {
             const query = document.getElementById('searchInput').value;
             if (!query) return;
+
+            // 검색 시작 시 키보드 내리기 (모바일 편의성)
+            document.getElementById('searchInput').blur();
 
             const list = document.getElementById('resultsList');
             const container = document.getElementById('searchResults');
@@ -323,7 +340,9 @@
                         <div class="font-bold text-xs text-slate-800">${place.display_name.split(',')[0]}</div>
                         <div class="text-[10px] text-slate-400 truncate">${place.display_name}</div>
                     `;
-                    item.onclick = () => {
+                    // 🔥 [모바일 패치] 검색 결과 클릭 시 이벤트 전파 중단
+                    item.onclick = (e) => {
+                        e.stopPropagation();
                         const lat = parseFloat(place.lat);
                         const lng = parseFloat(place.lon);
                         
@@ -349,22 +368,33 @@
         }
 
         // 9. 이벤트 리스너
-        document.getElementById('searchBtn').onclick = searchPlace;
-        document.getElementById('searchInput').onkeypress = (e) => e.key === 'Enter' && searchPlace();
+        document.getElementById('searchBtn').onclick = (e) => {
+            e.stopPropagation();
+            searchPlace();
+        };
+        document.getElementById('searchInput').onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                e.stopPropagation();
+                searchPlace();
+            }
+        };
         
-        document.getElementById('confirmBtn').onclick = () => {
+        document.getElementById('confirmBtn').onclick = (e) => {
+            e.stopPropagation();
             localUser.lat = localUser.pendingLat;
             localUser.lng = localUser.pendingLng;
             updateMyPosition(); 
             document.getElementById('confirmPanel').classList.add('hidden');
         };
         
-        document.getElementById('cancelBtn').onclick = () => {
+        document.getElementById('cancelBtn').onclick = (e) => {
+            e.stopPropagation();
             if (tempMarker) map.removeLayer(tempMarker);
             document.getElementById('confirmPanel').classList.add('hidden');
         };
 
-        document.getElementById('fitBoundsBtn').onclick = () => {
+        document.getElementById('fitBoundsBtn').onclick = (e) => {
+            e.stopPropagation();
             if (window.allUsersBounds && window.allUsersBounds.isValid()) {
                 map.fitBounds(window.allUsersBounds, { padding: [50, 50] });
             } else {
@@ -381,7 +411,9 @@
             box.scrollTop = box.scrollHeight;
         }
 
-        document.getElementById('chatForm').onsubmit = async () => {
+        document.getElementById('chatForm').onsubmit = async (e) => {
+             // e.preventDefault() 대신 onsubmit="return false" 사용했으나 안전을 위해 추가
+             if(e) e.preventDefault();
              const input = document.getElementById('chatInput');
              const text = input.value.trim();
              if (!text || !localUser.id) return;
@@ -390,16 +422,19 @@
              });
              input.value = '';
         };
-        document.getElementById('openChatBtn').onclick = () => {
+        document.getElementById('openChatBtn').onclick = (e) => {
+            e.stopPropagation();
             document.getElementById('chatPanel').classList.remove('chat-hidden');
             document.getElementById('openChatBtn').classList.add('hidden');
         };
-        document.getElementById('closeChat').onclick = () => {
+        document.getElementById('closeChat').onclick = (e) => {
+            e.stopPropagation();
             document.getElementById('chatPanel').classList.add('chat-hidden');
             document.getElementById('openChatBtn').classList.remove('hidden');
         };
 
         document.getElementById('statusSelect').onchange = (e) => {
+            e.stopPropagation();
             const statusMap = { 'studying': '📖', 'moving': '🚶', 'coffee': '☕', 'home': '🏡' };
             localUser.status = e.target.value;
             localUser.emoji = statusMap[e.target.value];
