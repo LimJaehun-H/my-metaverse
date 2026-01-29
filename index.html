@@ -10,14 +10,20 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         #map { height: 100vh; width: 100vw; z-index: 1; background-color: #f1f5f9; cursor: crosshair; }
-        .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); }
+        .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); }
+        
+        /* 마커 스타일 */
         .avatar-marker { display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .avatar-img { width: 44px; height: 44px; border-radius: 16px; border: 3px solid white; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 22px; transition: transform 0.2s; }
         .avatar-label { background: rgba(15, 23, 42, 0.8); color: white; padding: 3px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; margin-top: 6px; white-space: nowrap; }
         .status-tag { position: absolute; top: -12px; right: -12px; font-size: 14px; background: white; border-radius: 10px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        
+        /* 유틸리티 */
         .ui-overlay { z-index: 1000; position: absolute; }
         .results-scroll::-webkit-scrollbar { width: 4px; }
         .results-scroll::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        
+        /* 애니메이션 */
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
         .animate-float { animation: float 3s ease-in-out infinite; }
         #chatPanel { transition: transform 0.3s ease; }
@@ -27,225 +33,15 @@
 <body>
     <div id="map"></div>
 
+    <!-- 버전 확인용 배지 (업데이트 확인용) -->
+    <div class="ui-overlay top-2 left-2 z-[2000] pointer-events-none">
+        <span class="bg-black/50 text-white text-[10px] px-2 py-1 rounded-full font-mono">Status: Connected</span>
+    </div>
+
     <!-- 상단 UI -->
     <div class="ui-overlay top-6 left-6 right-6 flex flex-col gap-3 pointer-events-none items-center">
         <div class="flex flex-col md:flex-row gap-3 w-full max-w-5xl justify-between">
             <div class="relative w-full md:w-[400px] pointer-events-auto">
                 <div class="glass-panel p-2 rounded-2xl flex items-center gap-2">
                     <div class="pl-3 text-slate-400"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></div>
-                    <input id="searchInput" type="text" placeholder="장소 검색" class="flex-1 bg-transparent px-2 py-2.5 outline-none text-sm font-medium text-slate-700">
-                    <button id="searchBtn" class="bg-slate-900 hover:bg-black text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95">검색</button>
-                </div>
-                <div id="searchResults" class="hidden absolute top-full left-0 right-0 glass-panel mt-3 rounded-2xl shadow-2xl overflow-hidden z-50 border border-white/50">
-                    <div class="p-4 text-[11px] font-bold text-slate-400 border-b border-slate-100 flex justify-between items-center tracking-widest uppercase">
-                        <span>검색 결과</span>
-                        <button onclick="document.getElementById('searchResults').classList.add('hidden')" class="hover:text-slate-900 transition text-xs">닫기</button>
-                    </div>
-                    <div id="resultsList" class="results-scroll max-h-[300px] overflow-y-auto"></div>
-                </div>
-            </div>
-            <div class="glass-panel p-2 rounded-2xl flex items-center gap-2 pointer-events-auto">
-                <div class="flex items-center gap-3 px-4 border-r border-slate-200">
-                    <div id="statusIndicator" class="w-2 h-2 rounded-full bg-red-500" title="연결 상태"></div>
-                    <select id="statusSelect" class="text-sm font-extrabold bg-transparent outline-none cursor-pointer text-slate-700 pr-2">
-                        <option value="studying">📖 공부 중</option>
-                        <option value="moving">🚶 이동 중</option>
-                        <option value="toilet">🧻 화장실</option>
-                        <option value="meal">🍴 식사 중</option>
-                        <option value="home">🏡 집</option>
-                        <option value="sleep">😴 취침 중</option>
-                    </select>
-                </div>
-                <div id="playerCount" class="text-xs font-black text-slate-500 px-4">0 ONLINE</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 채팅창 -->
-    <div id="chatPanel" class="ui-overlay bottom-24 left-6 w-72 pointer-events-auto chat-hidden">
-        <div class="glass-panel rounded-3xl flex flex-col h-96 shadow-2xl overflow-hidden border border-white/40">
-            <div class="p-4 bg-slate-900/5 border-b border-slate-100 flex justify-between items-center">
-                <span class="text-xs font-black text-slate-600 uppercase">Live Chat</span>
-                <button id="closeChat" class="text-slate-400 hover:text-slate-900">✕</button>
-            </div>
-            <div id="chatMessages" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3 results-scroll"></div>
-            <div class="p-3 border-t border-slate-100 bg-white/50">
-                <div class="flex gap-2">
-                    <input id="chatInput" type="text" placeholder="메시지..." class="flex-1 bg-white/80 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none">
-                    <button id="sendChatBtn" class="bg-blue-600 text-white px-3 py-2 rounded-xl text-xs font-bold">전송</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="ui-overlay bottom-24 left-6 pointer-events-auto">
-        <button id="openChatBtn" class="glass-panel p-4 rounded-full shadow-2xl hover:scale-110 transition active:scale-95 border-2 border-white">
-            <svg class="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-        </button>
-    </div>
-
-    <!-- 확인 패널 -->
-    <div id="confirmPanel" class="hidden ui-overlay bottom-10 left-1/2 -translate-x-1/2 pointer-events-auto w-full max-w-sm px-4">
-        <div class="glass-panel p-6 rounded-[32px] shadow-2xl border-t border-white text-center">
-            <div class="w-12 h-1 bg-slate-200 rounded-full mx-auto mb-6"></div>
-            <p class="text-[11px] text-blue-600 font-black mb-1 uppercase tracking-[0.2em]">New Destination</p>
-            <h3 class="text-lg font-bold text-slate-800 mb-6 leading-tight" id="selectedPlaceName">이 위치로 이동할까요?</h3>
-            <div class="flex flex-col gap-2">
-                <button id="confirmBtn" class="w-full bg-slate-900 hover:bg-black text-white font-bold py-4 rounded-2xl transition shadow-xl active:scale-95">위치 확정 및 공유하기</button>
-                <button id="cancelBtn" class="py-3 text-sm text-slate-400 font-semibold hover:text-slate-600 transition">취소</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
-        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
-        import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, serverTimestamp, addDoc, query } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyD_7J5EpBLxErjgjYRBvEGRgJJfStbx58g",
-            authDomain: "korea-metaverse.firebaseapp.com",
-            projectId: "korea-metaverse",
-            storageBucket: "korea-metaverse.firebasestorage.app",
-            messagingSenderId: "259477654308",
-            appId: "1:259477654308:web:031a4ca25a5138fc1341b1",
-            measurementId: "G-EEPNYY1D1C"
-        };
-        const appId = 'korea-metaverse-live-final'; 
-
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
-        const koreaBounds = L.latLngBounds([32.5, 123.5], [38.8, 131.0]);
-        const map = L.map('map', { zoomControl: false, attributionControl: false, minZoom: 8, maxBounds: koreaBounds, maxBoundsViscosity: 1.0 }).setView([36.764, 127.281], 15);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd' }).addTo(map);
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-        let localUser = { id: null, lat: 36.764, lng: 127.281, status: 'studying', emoji: '📖', isShared: false };
-        const remoteMarkers = {};
-        let tempMarker = null;
-
-        function createAvatarIcon(statusEmoji, isLocal = false, isTemp = false) {
-            const color = isTemp ? '#64748b' : (isLocal ? '#0f172a' : '#10b981');
-            return L.divIcon({
-                className: 'custom-div-icon',
-                html: `<div class="avatar-marker ${isTemp ? 'animate-float opacity-70' : ''}"><div class="avatar-img" style="background-color: ${color}">🐸<div class="status-tag">${statusEmoji}</div></div><div class="avatar-label">${isTemp ? '선택 중' : (isLocal ? '나' : '다른 유저')}</div></div>`,
-                iconSize: [44, 66], iconAnchor: [22, 55]
-            });
-        }
-        const myRealMarker = L.marker([localUser.lat, localUser.lng], { icon: createAvatarIcon(localUser.emoji, true), zIndexOffset: 1000 });
-
-        async function initSync() {
-            await signInAnonymously(auth);
-            onAuthStateChanged(auth, (user) => {
-                if (user) { 
-                    localUser.id = user.uid;
-                    document.getElementById('statusIndicator').className = "w-2 h-2 rounded-full bg-green-500 animate-pulse";
-                    startListening(); 
-                }
-            });
-        }
-
-        async function syncLocalStatus() {
-            // Optimistic UI: 서버 응답 기다리지 않고 즉시 화면 갱신
-            if (!map.hasLayer(myRealMarker)) myRealMarker.addTo(map);
-            myRealMarker.setLatLng([localUser.lat, localUser.lng]);
-            myRealMarker.setIcon(createAvatarIcon(getEmoji(localUser.status), true));
-
-            if (localUser.id) {
-                try {
-                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', localUser.id), {
-                        lat: localUser.lat, lng: localUser.lng, status: localUser.status, emoji: getEmoji(localUser.status), lastSeen: serverTimestamp()
-                    });
-                } catch(e) { console.error(e); }
-            }
-        }
-
-        function startListening() {
-            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
-                snapshot.docChanges().forEach(change => {
-                    const id = change.doc.id; const data = change.doc.data();
-                    if (id === localUser.id) return;
-                    if (change.type === 'removed') { if (remoteMarkers[id]) { map.removeLayer(remoteMarkers[id]); delete remoteMarkers[id]; } }
-                    else {
-                        if (remoteMarkers[id]) { remoteMarkers[id].setLatLng([data.lat, data.lng]); remoteMarkers[id].setIcon(createAvatarIcon(data.emoji, false)); }
-                        else { remoteMarkers[id] = L.marker([data.lat, data.lng], { icon: createAvatarIcon(data.emoji, false) }).addTo(map); }
-                    }
-                });
-                document.getElementById('playerCount').textContent = `${Object.keys(remoteMarkers).length + 1} ONLINE`;
-            });
-            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (snapshot) => {
-                const messages = [];
-                snapshot.forEach(doc => messages.push({id: doc.id, ...doc.data()}));
-                messages.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-                const chat = document.getElementById('chatMessages'); chat.innerHTML = '';
-                messages.slice(-30).forEach(msg => {
-                    const isMe = msg.senderId === localUser.id;
-                    const div = document.createElement('div');
-                    div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'}`;
-                    div.innerHTML = `<div class="flex items-center gap-1 mb-1"><span class="text-[9px] font-bold text-slate-400 uppercase">${msg.senderId?.substring(0, 5) || 'Guest'}</span></div><div class="${isMe ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'} px-3 py-2 rounded-2xl text-[11px] max-w-[90%] shadow-sm">${msg.text}</div>`;
-                    chat.appendChild(div);
-                });
-                chat.scrollTop = chat.scrollHeight;
-            });
-        }
-
-        async function sendChatMessage() {
-            const input = document.getElementById('chatInput'); const text = input.value.trim();
-            if (!text || !localUser.id) return;
-            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), { text: text, senderId: localUser.id, createdAt: serverTimestamp() });
-            input.value = '';
-        }
-
-        function getEmoji(status) { const map = { studying: '📖', moving: '🚶', toilet: '🧻', meal: '🍴', home: '🏡', sleep: '😴' }; return map[status] || '❓'; }
-        function selectLocation(lat, lng, name) {
-            if (tempMarker) map.removeLayer(tempMarker);
-            tempMarker = L.marker([lat, lng], { icon: createAvatarIcon(getEmoji(localUser.status), true, true) }).addTo(map);
-            document.getElementById('selectedPlaceName').textContent = name || "선택된 위치";
-            document.getElementById('confirmPanel').classList.remove('hidden');
-            localUser.pendingLat = lat; localUser.pendingLng = lng;
-        }
-
-        async function handleSearch() {
-            const query = document.getElementById('searchInput').value.trim(); if (!query) return;
-            document.getElementById('searchResults').classList.remove('hidden');
-            const listDiv = document.getElementById('resultsList'); listDiv.innerHTML = '<div class="p-8 text-center text-xs text-slate-400">검색 중...</div>';
-            try {
-                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=kr&addressdetails=1&limit=10`);
-                const data = await res.json(); listDiv.innerHTML = '';
-                if(data.length > 0) {
-                    data.forEach(item => {
-                        const div = document.createElement('div');
-                        div.className = "p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer";
-                        div.innerHTML = `<div class="font-bold text-sm text-slate-800">${item.display_name.split(',')[0]}</div><div class="text-[10px] text-slate-400 truncate">${item.display_name}</div>`;
-                        div.onclick = () => {
-                            map.flyTo([item.lat, item.lon], 17); selectLocation(item.lat, item.lon, item.display_name.split(',')[0]);
-                            document.getElementById('searchResults').classList.add('hidden');
-                        };
-                        listDiv.appendChild(div);
-                    });
-                } else { listDiv.innerHTML = '<div class="p-8 text-center text-xs text-slate-400">결과 없음</div>'; }
-            } catch { listDiv.innerHTML = '<div class="p-8 text-center text-xs text-red-400">오류 발생</div>'; }
-        }
-
-        map.on('click', (e) => selectLocation(e.latlng.lat, e.latlng.lng));
-        document.getElementById('searchBtn').onclick = handleSearch;
-        document.getElementById('searchInput').onkeypress = (e) => { if(e.key === 'Enter') handleSearch(); };
-        document.getElementById('confirmBtn').onclick = () => {
-            localUser.lat = localUser.pendingLat; localUser.lng = localUser.pendingLng; localUser.isShared = true;
-            if (tempMarker) { map.removeLayer(tempMarker); tempMarker = null; }
-            syncLocalStatus(); document.getElementById('confirmPanel').classList.add('hidden');
-        };
-        document.getElementById('cancelBtn').onclick = () => { if (tempMarker) map.removeLayer(tempMarker); tempMarker = null; document.getElementById('confirmPanel').classList.add('hidden'); };
-        document.getElementById('statusSelect').onchange = (e) => { localUser.status = e.target.value; syncLocalStatus(); };
-        document.getElementById('openChatBtn').onclick = () => { document.getElementById('chatPanel').classList.remove('chat-hidden'); document.getElementById('openChatBtn').classList.add('hidden'); };
-        document.getElementById('closeChat').onclick = () => { document.getElementById('chatPanel').classList.add('chat-hidden'); document.getElementById('openChatBtn').classList.remove('hidden'); };
-        document.getElementById('sendChatBtn').onclick = sendChatMessage;
-        document.getElementById('chatInput').onkeypress = (e) => { if(e.key === 'Enter') sendChatMessage(); };
-        window.addEventListener('beforeunload', async () => { if(localUser.id) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', localUser.id)); });
-
-        initSync();
-    </script>
-</body>
-</html>
+                    <input id="searchInput" type="text" placeholder="장소 검색 (
