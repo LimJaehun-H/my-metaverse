@@ -48,7 +48,8 @@
 
     <!-- 검색창 & 컨트롤 -->
     <div class="ui-overlay top-4 left-0 right-0 flex justify-center pointer-events-none px-4">
-        <div class="flex flex-col w-full max-w-md gap-2 pointer-events-auto">
+        <!-- 🔥 [수정] id="topUiContainer" 추가하여 터치 이벤트 제어 -->
+        <div id="topUiContainer" class="flex flex-col w-full max-w-md gap-2 pointer-events-auto">
             <!-- 검색바 -->
             <div class="glass-panel p-2 rounded-2xl flex items-center gap-2 shadow-xl">
                 <div class="pl-3 text-slate-400">
@@ -132,9 +133,9 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, serverTimestamp, addDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-        // 1. Firebase 설정 (오타 수정됨)
+        // 1. Firebase 설정 (완벽 수정됨)
         const firebaseConfig = {
-            apiKey: "AIzaSyD_7J5EpBLxErjGjYRBvEGRgJJfStbx58g", // 'g' -> 'G' 수정됨
+            apiKey: "AIzaSyD_7J5EpBLxErjGjYRBvEGRgJJfStbx58g", 
             authDomain: "korea-metaverse.firebaseapp.com",
             projectId: "korea-metaverse",
             storageBucket: "korea-metaverse.firebasestorage.app",
@@ -148,14 +149,40 @@
         const db = getFirestore(app);
 
         // 2. 지도 초기화
-        const map = L.map('map', { zoomControl: false }).setView([37.5665, 126.9780], 13); // 기본 서울
+        const map = L.map('map', { zoomControl: false }).setView([37.5665, 126.9780], 13);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+        // 🔥 [모바일 패치] UI 요소가 지도의 터치를 방해하지 않도록 설정
+        // 이 코드가 없으면 모바일에서 검색창 클릭 시 지도가 같이 눌려서 입력이 풀립니다.
+        const disableMapInteraction = (id) => {
+            const el = document.getElementById(id);
+            if (el) {
+                L.DomEvent.disableClickPropagation(el);
+                L.DomEvent.disableScrollPropagation(el);
+            }
+        };
+
+        // UI 요소들에 적용
+        ['topUiContainer', 'chatPanel', 'openChatBtn', 'fitBoundsBtn', 'confirmPanel'].forEach(id => {
+            disableMapInteraction(id);
+        });
         
+        // 검색창과 채팅창은 터치 이벤트도 확실하게 막기
+        const stopTouch = (e) => e.stopPropagation();
+        ['searchInput', 'chatInput', 'searchBtn', 'sendChatBtn', 'statusSelect'].forEach(id => {
+            const el = document.getElementById(id);
+            if(el) {
+                el.addEventListener('touchstart', stopTouch);
+                el.addEventListener('touchmove', stopTouch);
+            }
+        });
+
+        // 3. 변수 초기화
         let localUser = { id: null, lat: 37.5665, lng: 126.9780, status: 'studying', emoji: '📖' };
         let tempMarker = null;
-        const markers = {}; // 다른 유저 마커들
+        const markers = {}; 
 
-        // 3. 아이콘 생성 함수
+        // 4. 아이콘 생성
         function createIcon(emoji, isMe, isTemp) {
             const color = isTemp ? '#94a3b8' : (isMe ? '#3b82f6' : '#ffffff');
             const zIndex = isMe ? 1000 : 500;
@@ -174,7 +201,7 @@
             });
         }
 
-        // 4. 로그인 및 동기화 시작
+        // 5. 로그인 및 시작
         signInAnonymously(auth).catch(e => alert("로그인 실패: " + e.message));
 
         onAuthStateChanged(auth, (user) => {
@@ -184,19 +211,17 @@
                 badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> 온라인';
                 badge.classList.replace('bg-slate-800', 'bg-blue-600');
                 
-                // Firestore 리스너 시작
                 startSync();
+                updateMyPosition();
             }
         });
 
-        // 5. 내 위치 서버로 전송 (확인 버튼 누를 때만 실행)
+        // 6. 위치 전송
         async function updateMyPosition() {
             if (!localUser.id) return;
             try {
-                // 내 마커 지도에 표시 (기존 임시 마커 제거)
                 if (tempMarker) map.removeLayer(tempMarker);
                 
-                // 내 마커가 이미 있으면 위치만 이동, 없으면 생성
                 if (!markers['me']) {
                     markers['me'] = L.marker([localUser.lat, localUser.lng], { 
                         icon: createIcon(localUser.emoji, true, false),
@@ -207,7 +232,6 @@
                     markers['me'].setIcon(createIcon(localUser.emoji, true, false));
                 }
 
-                // 서버 전송
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', localUser.id), {
                     lat: localUser.lat,
                     lng: localUser.lng,
@@ -216,7 +240,6 @@
                     lastSeen: serverTimestamp()
                 });
                 
-                // 지도 중심 이동
                 map.flyTo([localUser.lat, localUser.lng], 16);
 
             } catch (e) {
@@ -224,7 +247,7 @@
             }
         }
 
-        // 6. 다른 유저들 위치 실시간 수신
+        // 7. 실시간 동기화
         function startSync() {
             const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
             onSnapshot(usersRef, (snapshot) => {
@@ -234,18 +257,16 @@
                 snapshot.docChanges().forEach((change) => {
                     const data = change.doc.data();
                     const uid = change.doc.id;
-                    if (uid === localUser.id) return; // 나는 제외
+                    if (uid === localUser.id) return;
 
                     if (change.type === 'removed') {
                         if (markers[uid]) { map.removeLayer(markers[uid]); delete markers[uid]; }
                     } else {
-                        // 유저 추가 또는 이동
                         if (!markers[uid]) {
                             markers[uid] = L.marker([data.lat, data.lng], { 
                                 icon: createIcon(data.emoji, false, false) 
                             }).addTo(map).bindPopup(`<div class="text-xs font-bold p-1">친구 접속중!</div>`);
                             
-                            // 🚀 알림: 누군가 새로 들어왔거나 움직임
                             const badge = document.getElementById('connectionBadge');
                             badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span> 친구가 움직였어요!`;
                             setTimeout(() => badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> 온라인', 3000);
@@ -258,15 +279,12 @@
                     }
                 });
                 
-                // 현재 접속자 수 업데이트 (나 포함)
                 document.getElementById('playerCount').innerText = count + 1;
                 
-                // [친구 찾기] 버튼 기능용 데이터 저장
                 window.allUsersBounds = bounds;
                 if (localUser.id && markers['me']) window.allUsersBounds.extend(markers['me'].getLatLng());
             });
 
-            // 채팅 수신
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (snapshot) => {
                 snapshot.docChanges().forEach(change => {
                     if (change.type === 'added') {
@@ -277,7 +295,7 @@
             });
         }
 
-        // 7. 검색 기능 (OpenStreetMap)
+        // 8. 검색
         async function searchPlace() {
             const query = document.getElementById('searchInput').value;
             if (!query) return;
@@ -306,7 +324,6 @@
                         <div class="text-[10px] text-slate-400 truncate">${place.display_name}</div>
                     `;
                     item.onclick = () => {
-                        // 임시 마커 생성 (확인 전)
                         const lat = parseFloat(place.lat);
                         const lng = parseFloat(place.lon);
                         
@@ -318,11 +335,9 @@
                         map.flyTo([lat, lng], 16);
                         container.classList.add('hidden');
                         
-                        // 확인 패널 표시
                         document.getElementById('selectedPlaceName').innerText = place.display_name.split(',')[0];
                         document.getElementById('confirmPanel').classList.remove('hidden');
                         
-                        // 임시 저장
                         localUser.pendingLat = lat;
                         localUser.pendingLng = lng;
                     };
@@ -333,14 +348,14 @@
             }
         }
 
-        // 8. 이벤트 연결
+        // 9. 이벤트 리스너
         document.getElementById('searchBtn').onclick = searchPlace;
         document.getElementById('searchInput').onkeypress = (e) => e.key === 'Enter' && searchPlace();
         
         document.getElementById('confirmBtn').onclick = () => {
             localUser.lat = localUser.pendingLat;
             localUser.lng = localUser.pendingLng;
-            updateMyPosition(); // 서버 전송
+            updateMyPosition(); 
             document.getElementById('confirmPanel').classList.add('hidden');
         };
         
@@ -349,7 +364,6 @@
             document.getElementById('confirmPanel').classList.add('hidden');
         };
 
-        // 친구 찾기 (모두 보기) 버튼
         document.getElementById('fitBoundsBtn').onclick = () => {
             if (window.allUsersBounds && window.allUsersBounds.isValid()) {
                 map.fitBounds(window.allUsersBounds, { padding: [50, 50] });
@@ -358,7 +372,6 @@
             }
         };
 
-        // 채팅 관련
         function addChatMessage(text, isMe) {
             const box = document.getElementById('chatMessages');
             const div = document.createElement('div');
@@ -386,12 +399,11 @@
             document.getElementById('openChatBtn').classList.remove('hidden');
         };
 
-        // 상태 변경
         document.getElementById('statusSelect').onchange = (e) => {
             const statusMap = { 'studying': '📖', 'moving': '🚶', 'coffee': '☕', 'home': '🏡' };
             localUser.status = e.target.value;
             localUser.emoji = statusMap[e.target.value];
-            if (markers['me']) updateMyPosition(); // 상태 바꾸면 즉시 업데이트
+            if (markers['me']) updateMyPosition();
         };
 
     </script>
