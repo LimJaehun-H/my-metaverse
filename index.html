@@ -156,39 +156,24 @@
         const map = L.map('map', { zoomControl: false }).setView([37.5665, 126.9780], 13);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
 
-        // 🔥 [모바일 패치] UI 요소와 지도 간의 이벤트 간섭을 완벽하게 차단
-        // Leaflet.DomEvent.disableClickPropagation만으로는 부족한 경우가 있어, 직접 이벤트 전파를 막습니다.
+        // 🔥 모바일 패치: UI 이벤트 제어
         function preventMapInterference(id) {
             const el = document.getElementById(id);
             if (!el) return;
-
-            // 1. Leaflet 내장 함수: 클릭, 더블클릭, 스크롤 휠 전파 차단
             L.DomEvent.disableClickPropagation(el);
             L.DomEvent.disableScrollPropagation(el);
-
-            // 2. 모바일 터치 이벤트 강력 차단 (지도 드래그/줌 방지)
             const stop = (e) => { e.stopPropagation(); };
-
-            // 입력창과 버튼에 대해 터치 이벤트가 지도로 새나가지 않게 함
             el.addEventListener('touchstart', stop, { passive: false });
             el.addEventListener('touchmove', stop, { passive: false });
             el.addEventListener('touchend', stop, { passive: false });
-            el.addEventListener('mousedown', stop); // PC 마우스 클릭도 보호
+            el.addEventListener('mousedown', stop);
             el.addEventListener('click', stop);
         }
-
-        // 전체 컨테이너와 버튼들에 적용
         ['topUiContainer', 'chatPanel', 'openChatBtn', 'fitBoundsBtn', 'confirmPanel', 'searchResults'].forEach(preventMapInterference);
-
-        // 입력창에는 포커스가 유지되도록 추가 조치 (특히 아이패드/모바일용)
         ['searchInput', 'chatInput'].forEach(id => {
             const el = document.getElementById(id);
             if(el) {
-                // 입력창 터치 시 바로 포커스 (지도가 포커스를 뺏지 못하게 함)
-                el.addEventListener('touchstart', (e) => {
-                    e.stopPropagation();
-                    el.focus(); 
-                }, { passive: false });
+                el.addEventListener('touchstart', (e) => { e.stopPropagation(); el.focus(); }, { passive: false });
             }
         });
 
@@ -228,6 +213,15 @@
                 
                 startSync();
                 updateMyPosition();
+                
+                // 🔥 [추가] 10초마다 '나 살아있음' 신호 보내기 (생존신고)
+                setInterval(() => {
+                    if (localUser.id) {
+                        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', localUser.id), {
+                            lastSeen: serverTimestamp()
+                        }, { merge: true });
+                    }
+                }, 10000);
             }
         });
 
@@ -236,69 +230,82 @@
             if (!localUser.id) return;
             try {
                 if (tempMarker) map.removeLayer(tempMarker);
-                
                 if (!markers['me']) {
-                    markers['me'] = L.marker([localUser.lat, localUser.lng], { 
-                        icon: createIcon(localUser.emoji, true, false),
-                        zIndexOffset: 1000 
-                    }).addTo(map);
+                    markers['me'] = L.marker([localUser.lat, localUser.lng], { icon: createIcon(localUser.emoji, true, false), zIndexOffset: 1000 }).addTo(map);
                 } else {
                     markers['me'].setLatLng([localUser.lat, localUser.lng]);
                     markers['me'].setIcon(createIcon(localUser.emoji, true, false));
                 }
-
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', localUser.id), {
-                    lat: localUser.lat,
-                    lng: localUser.lng,
-                    status: localUser.status,
-                    emoji: localUser.emoji,
-                    lastSeen: serverTimestamp()
-                });
-                
+                    lat: localUser.lat, lng: localUser.lng, status: localUser.status, emoji: localUser.emoji,
+                    lastSeen: serverTimestamp() // 이동할 때도 생존신고
+                }, { merge: true });
                 map.flyTo([localUser.lat, localUser.lng], 16);
-
-            } catch (e) {
-                console.error("전송 실패:", e);
-            }
+            } catch (e) { console.error("전송 실패:", e); }
         }
 
-        // 7. 실시간 동기화
+        // 7. 실시간 동기화 & 유령 유저 청소
         function startSync() {
             const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
+            
+            // 실시간 데이터 수신
             onSnapshot(usersRef, (snapshot) => {
                 const bounds = L.latLngBounds();
+                const now = Date.now();
 
-                snapshot.docChanges().forEach((change) => {
-                    const data = change.doc.data();
-                    const uid = change.doc.id;
-                    if (uid === localUser.id) return;
+                snapshot.docs.forEach((doc) => {
+                    const data = doc.data();
+                    const uid = doc.id;
+                    if (uid === localUser.id) return; // 나는 건너뜀
 
-                    if (change.type === 'removed') {
-                        if (markers[uid]) { map.removeLayer(markers[uid]); delete markers[uid]; }
+                    // 🔥 [필터링] 60초 이상 활동 없는 유저는 표시 안 함
+                    const lastSeen = data.lastSeen ? data.lastSeen.toMillis() : 0;
+                    const isStale = (now - lastSeen) > 60000; // 1분
+
+                    if (isStale) {
+                        if (markers[uid]) { 
+                            map.removeLayer(markers[uid]); 
+                            delete markers[uid]; 
+                        }
                     } else {
                         if (!markers[uid]) {
-                            markers[uid] = L.marker([data.lat, data.lng], { 
-                                icon: createIcon(data.emoji, false, false) 
-                            }).addTo(map).bindPopup(`<div class="text-xs font-bold p-1">친구 접속중!</div>`);
-                            
-                            const badge = document.getElementById('connectionBadge');
-                            badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span> 친구가 움직였어요!`;
-                            setTimeout(() => badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> 온라인', 3000);
+                            markers[uid] = L.marker([data.lat, data.lng], { icon: createIcon(data.emoji, false, false) })
+                                .addTo(map).bindPopup(`<div class="text-xs font-bold p-1">친구 접속중!</div>`);
+                            // 새 친구 알림
+                            markers[uid].lastSeenTime = lastSeen; // 로컬에 저장
                         } else {
                             markers[uid].setLatLng([data.lat, data.lng]);
                             markers[uid].setIcon(createIcon(data.emoji, false, false));
+                            markers[uid].lastSeenTime = lastSeen;
                         }
                         bounds.extend([data.lat, data.lng]);
                     }
                 });
                 
-                const onlineCount = Object.keys(markers).length + 1;
-                document.getElementById('playerCount').innerText = onlineCount;
+                updateUserCount();
                 
                 window.allUsersBounds = bounds;
                 if (localUser.id && markers['me']) window.allUsersBounds.extend(markers['me'].getLatLng());
             });
 
+            // 🔥 [추가] 5초마다 지도에서 멈춘 유저(유령) 강제 삭제
+            setInterval(() => {
+                const now = Date.now();
+                let changed = false;
+                Object.keys(markers).forEach(uid => {
+                    if (uid === 'me') return;
+                    const marker = markers[uid];
+                    // 1분 이상 업데이트 없는 마커는 삭제
+                    if (marker.lastSeenTime && (now - marker.lastSeenTime > 60000)) {
+                        map.removeLayer(marker);
+                        delete markers[uid];
+                        changed = true;
+                    }
+                });
+                if(changed) updateUserCount();
+            }, 5000);
+
+            // 채팅 수신
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (snapshot) => {
                 snapshot.docChanges().forEach(change => {
                     if (change.type === 'added') {
@@ -309,98 +316,53 @@
             });
         }
 
+        function updateUserCount() {
+            const onlineCount = Object.keys(markers).length + (markers['me'] ? 1 : 1);
+            document.getElementById('playerCount').innerText = onlineCount;
+        }
+
         // 8. 검색
         async function searchPlace() {
             const query = document.getElementById('searchInput').value;
             if (!query) return;
-
-            // 검색 시작 시 키보드 내리기 (모바일 편의성)
             document.getElementById('searchInput').blur();
-
             const list = document.getElementById('resultsList');
             const container = document.getElementById('searchResults');
-            
             list.innerHTML = '<div class="p-4 text-center text-xs text-slate-400">검색 중...</div>';
             container.classList.remove('hidden');
 
             try {
                 const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=kr`);
                 const data = await res.json();
-                
                 list.innerHTML = '';
-                if (data.length === 0) {
-                    list.innerHTML = '<div class="p-4 text-center text-xs text-slate-400">결과가 없습니다.</div>';
-                    return;
-                }
+                if (data.length === 0) { list.innerHTML = '<div class="p-4 text-center text-xs text-slate-400">결과가 없습니다.</div>'; return; }
 
                 data.forEach(place => {
                     const item = document.createElement('div');
                     item.className = 'p-3 hover:bg-slate-50 border-b border-slate-50 cursor-pointer transition';
-                    item.innerHTML = `
-                        <div class="font-bold text-xs text-slate-800">${place.display_name.split(',')[0]}</div>
-                        <div class="text-[10px] text-slate-400 truncate">${place.display_name}</div>
-                    `;
-                    // 🔥 [모바일 패치] 검색 결과 클릭 시 이벤트 전파 중단
+                    item.innerHTML = `<div class="font-bold text-xs text-slate-800">${place.display_name.split(',')[0]}</div><div class="text-[10px] text-slate-400 truncate">${place.display_name}</div>`;
                     item.onclick = (e) => {
                         e.stopPropagation();
-                        const lat = parseFloat(place.lat);
-                        const lng = parseFloat(place.lon);
-                        
+                        const lat = parseFloat(place.lat); const lng = parseFloat(place.lon);
                         if (tempMarker) map.removeLayer(tempMarker);
-                        tempMarker = L.marker([lat, lng], { 
-                            icon: createIcon(localUser.emoji, true, true) 
-                        }).addTo(map);
-                        
+                        tempMarker = L.marker([lat, lng], { icon: createIcon(localUser.emoji, true, true) }).addTo(map);
                         map.flyTo([lat, lng], 16);
                         container.classList.add('hidden');
-                        
                         document.getElementById('selectedPlaceName').innerText = place.display_name.split(',')[0];
                         document.getElementById('confirmPanel').classList.remove('hidden');
-                        
-                        localUser.pendingLat = lat;
-                        localUser.pendingLng = lng;
+                        localUser.pendingLat = lat; localUser.pendingLng = lng;
                     };
                     list.appendChild(item);
                 });
-            } catch (e) {
-                list.innerHTML = '<div class="p-4 text-center text-xs text-red-400">오류 발생</div>';
-            }
+            } catch (e) { list.innerHTML = '<div class="p-4 text-center text-xs text-red-400">오류 발생</div>'; }
         }
 
         // 9. 이벤트 리스너
-        document.getElementById('searchBtn').onclick = (e) => {
-            e.stopPropagation();
-            searchPlace();
-        };
-        document.getElementById('searchInput').onkeypress = (e) => {
-            if (e.key === 'Enter') {
-                e.stopPropagation();
-                searchPlace();
-            }
-        };
-        
-        document.getElementById('confirmBtn').onclick = (e) => {
-            e.stopPropagation();
-            localUser.lat = localUser.pendingLat;
-            localUser.lng = localUser.pendingLng;
-            updateMyPosition(); 
-            document.getElementById('confirmPanel').classList.add('hidden');
-        };
-        
-        document.getElementById('cancelBtn').onclick = (e) => {
-            e.stopPropagation();
-            if (tempMarker) map.removeLayer(tempMarker);
-            document.getElementById('confirmPanel').classList.add('hidden');
-        };
-
-        document.getElementById('fitBoundsBtn').onclick = (e) => {
-            e.stopPropagation();
-            if (window.allUsersBounds && window.allUsersBounds.isValid()) {
-                map.fitBounds(window.allUsersBounds, { padding: [50, 50] });
-            } else {
-                alert("아직 다른 친구가 접속하지 않았거나 위치를 잡지 못했습니다.");
-            }
-        };
+        document.getElementById('searchBtn').onclick = (e) => { e.stopPropagation(); searchPlace(); };
+        document.getElementById('searchInput').onkeypress = (e) => { if (e.key === 'Enter') { e.stopPropagation(); searchPlace(); } };
+        document.getElementById('confirmBtn').onclick = (e) => { e.stopPropagation(); localUser.lat = localUser.pendingLat; localUser.lng = localUser.pendingLng; updateMyPosition(); document.getElementById('confirmPanel').classList.add('hidden'); };
+        document.getElementById('cancelBtn').onclick = (e) => { e.stopPropagation(); if (tempMarker) map.removeLayer(tempMarker); document.getElementById('confirmPanel').classList.add('hidden'); };
+        document.getElementById('fitBoundsBtn').onclick = (e) => { e.stopPropagation(); if (window.allUsersBounds && window.allUsersBounds.isValid()) { map.fitBounds(window.allUsersBounds, { padding: [50, 50] }); } else { alert("아직 다른 친구가 접속하지 않았거나 위치를 잡지 못했습니다."); } };
 
         function addChatMessage(text, isMe) {
             const box = document.getElementById('chatMessages');
@@ -412,34 +374,16 @@
         }
 
         document.getElementById('chatForm').onsubmit = async (e) => {
-             // e.preventDefault() 대신 onsubmit="return false" 사용했으나 안전을 위해 추가
              if(e) e.preventDefault();
              const input = document.getElementById('chatInput');
              const text = input.value.trim();
              if (!text || !localUser.id) return;
-             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-                 text, senderId: localUser.id, createdAt: serverTimestamp()
-             });
+             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), { text, senderId: localUser.id, createdAt: serverTimestamp() });
              input.value = '';
         };
-        document.getElementById('openChatBtn').onclick = (e) => {
-            e.stopPropagation();
-            document.getElementById('chatPanel').classList.remove('chat-hidden');
-            document.getElementById('openChatBtn').classList.add('hidden');
-        };
-        document.getElementById('closeChat').onclick = (e) => {
-            e.stopPropagation();
-            document.getElementById('chatPanel').classList.add('chat-hidden');
-            document.getElementById('openChatBtn').classList.remove('hidden');
-        };
-
-        document.getElementById('statusSelect').onchange = (e) => {
-            e.stopPropagation();
-            const statusMap = { 'studying': '📖', 'moving': '🚶', 'coffee': '☕', 'home': '🏡' };
-            localUser.status = e.target.value;
-            localUser.emoji = statusMap[e.target.value];
-            if (markers['me']) updateMyPosition();
-        };
+        document.getElementById('openChatBtn').onclick = (e) => { e.stopPropagation(); document.getElementById('chatPanel').classList.remove('chat-hidden'); document.getElementById('openChatBtn').classList.add('hidden'); };
+        document.getElementById('closeChat').onclick = (e) => { e.stopPropagation(); document.getElementById('chatPanel').classList.add('chat-hidden'); document.getElementById('openChatBtn').classList.remove('hidden'); };
+        document.getElementById('statusSelect').onchange = (e) => { e.stopPropagation(); const statusMap = { 'studying': '📖', 'moving': '🚶', 'coffee': '☕', 'home': '🏡' }; localUser.status = e.target.value; localUser.emoji = statusMap[e.target.value]; if (markers['me']) updateMyPosition(); };
 
     </script>
 </body>
