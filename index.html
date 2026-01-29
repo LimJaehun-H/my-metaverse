@@ -9,26 +9,21 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        
-        /* 지도 스타일 강제 적용 */
-        #map { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100vw; 
-            height: 100vh; 
-            z-index: 0; 
-            background-color: #e5e7eb; /* 지도 로딩 전 회색 배경 */
-        }
-        
+        #map { height: 100vh; width: 100vw; z-index: 1; background-color: #f1f5f9; cursor: crosshair; }
         .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); }
+        
+        /* 마커 스타일 */
         .avatar-marker { display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .avatar-img { width: 44px; height: 44px; border-radius: 16px; border: 3px solid white; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 22px; transition: transform 0.2s; }
         .avatar-label { background: rgba(15, 23, 42, 0.8); color: white; padding: 3px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; margin-top: 6px; white-space: nowrap; }
         .status-tag { position: absolute; top: -12px; right: -12px; font-size: 14px; background: white; border-radius: 10px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        
+        /* 유틸리티 */
         .ui-overlay { z-index: 1000; position: absolute; }
         .results-scroll::-webkit-scrollbar { width: 4px; }
         .results-scroll::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        
+        /* 애니메이션 */
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
         .animate-float { animation: float 3s ease-in-out infinite; }
         #chatPanel { transition: transform 0.3s ease; }
@@ -40,7 +35,7 @@
 
     <!-- 버전 확인용 배지 -->
     <div class="ui-overlay top-2 left-2 z-[2000] pointer-events-none">
-        <span class="bg-blue-600/90 text-white text-[10px] px-2 py-1 rounded-full font-mono shadow-md">ver. 3.0 (Map Fix)</span>
+        <span id="versionBadge" class="bg-blue-600/90 text-white text-[10px] px-2 py-1 rounded-full font-mono shadow-md">ver. 3.1 (Sync Fix)</span>
     </div>
 
     <!-- 상단 UI -->
@@ -135,18 +130,18 @@
                 appId: "1:259477654308:web:031a4ca25a5138fc1341b1",
                 measurementId: "G-EEPNYY1D1C"
             };
-            appId = 'korea-metaverse-prod';
+            // App ID를 새로 변경하여 기존 데이터 충돌 방지
+            appId = 'korea-metaverse-live-final-v3';
         }
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // [중요] 지도 타일 교체 (OSM Standard) & 높이/너비 강제
+        // 지도 타일 교체 (OSM Standard) & 높이/너비 강제
         const koreaBounds = L.latLngBounds([32.5, 123.5], [38.8, 131.0]);
         const map = L.map('map', { zoomControl: false, attributionControl: false, minZoom: 7, maxBounds: koreaBounds, maxBoundsViscosity: 1.0 }).setView([36.764, 127.281], 15);
         
-        // 표준 OSM 타일 사용 (호환성 최고)
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
             maxZoom: 19, 
             attribution: '© OpenStreetMap' 
@@ -154,7 +149,6 @@
         
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // 지도 렌더링 강제 갱신 (화면 깨짐 방지)
         setTimeout(() => { map.invalidateSize(); }, 500);
         setTimeout(() => { map.invalidateSize(); }, 2000);
 
@@ -184,13 +178,18 @@
                     if (user) { 
                         localUser.id = user.uid;
                         document.getElementById('statusIndicator').className = "w-2 h-2 rounded-full bg-green-500 animate-pulse";
-                        document.querySelector('.ui-overlay.top-2.left-2 span').textContent = "Status: Connected";
-                        startListening(); 
+                        document.getElementById('versionBadge').textContent = "Status: Connected";
+                        
+                        // [핵심 수정] 로그인 즉시 리스너 시작 + 내 위치 전송
+                        startListening();
+                        syncLocalStatus(); 
                     }
                 });
             } catch(e) { 
                 console.error("Login Error:", e);
                 document.getElementById('statusIndicator').className = "w-2 h-2 rounded-full bg-red-500";
+                document.getElementById('versionBadge').textContent = "Status: Error";
+                document.getElementById('versionBadge').className = "bg-red-600/90 text-white text-[10px] px-2 py-1 rounded-full font-mono shadow-md";
             }
         }
 
@@ -220,7 +219,10 @@
                     }
                 });
                 document.getElementById('playerCount').textContent = `${Object.keys(remoteMarkers).length + 1} ONLINE`;
-            }, (error) => console.log("Offline Mode"));
+            }, (error) => {
+                console.error("DB Listen Error:", error);
+                document.getElementById('versionBadge').textContent = "DB Error";
+            });
 
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), (snapshot) => {
                 const messages = [];
@@ -235,7 +237,7 @@
                     chat.appendChild(div);
                 });
                 chat.scrollTop = chat.scrollHeight;
-            }, (error) => console.log("Chat Offline"));
+            });
         }
 
         async function sendChatMessage() {
